@@ -53,6 +53,7 @@ async function loadConfig() {
   if (cfg.lan_listen_port) $("#inp-lan-port").value = cfg.lan_listen_port;
   updatePairUI(cfg);
   updateRunningUI(cfg.is_running);
+  loadMqttUI(cfg);
 }
 
 function setupListeners() {
@@ -63,6 +64,8 @@ function setupListeners() {
   $("#btn-unpair").addEventListener("click", unpair);
   $("#btn-start").addEventListener("click", start);
   $("#btn-stop").addEventListener("click", stop);
+  $("#chk-mqtt").addEventListener("change", onMqttToggle);
+  $("#btn-save-mqtt").addEventListener("click", saveMqtt);
 
   $("#btn-settings-open").addEventListener("click", () => openModal("modal-settings"));
   $("#btn-settings-close").addEventListener("click", () => closeModal("modal-settings"));
@@ -245,6 +248,38 @@ function updateVitals(parsed) {
 }
 
 async function unpair() { await api("POST", "/unpair"); await loadConfig(); }
+
+function loadMqttUI(cfg) {
+  if (cfg.mqtt_enabled != null) $("#chk-mqtt").checked = cfg.mqtt_enabled;
+  $("#mqtt-opts").classList.toggle("hidden", !cfg.mqtt_enabled);
+  if (cfg.mqtt_broker != null) $("#inp-mqtt-broker").value = cfg.mqtt_broker;
+  if (cfg.mqtt_port != null) $("#inp-mqtt-port").value = cfg.mqtt_port;
+  if (cfg.mqtt_username != null) $("#inp-mqtt-user").value = cfg.mqtt_username;
+  if (cfg.mqtt_password != null) $("#inp-mqtt-pass").value = cfg.mqtt_password;
+  if (cfg.mqtt_topic1 != null) $("#inp-mqtt-topic1").value = cfg.mqtt_topic1;
+  if (cfg.mqtt_topic2 != null) $("#inp-mqtt-topic2").value = cfg.mqtt_topic2;
+  if (cfg.mqtt_client_id != null) $("#inp-mqtt-clientid").value = cfg.mqtt_client_id;
+}
+
+function onMqttToggle() {
+  $("#mqtt-opts").classList.toggle("hidden", !$("#chk-mqtt").checked);
+}
+
+async function saveMqtt() {
+  const body = {
+    mqtt_enabled: $("#chk-mqtt").checked,
+    mqtt_broker: $("#inp-mqtt-broker").value.trim(),
+    mqtt_port: parseInt($("#inp-mqtt-port").value, 10) || 1883,
+    mqtt_username: $("#inp-mqtt-user").value.trim(),
+    mqtt_password: $("#inp-mqtt-pass").value,
+    mqtt_topic1: $("#inp-mqtt-topic1").value.trim(),
+    mqtt_topic2: $("#inp-mqtt-topic2").value.trim(),
+    mqtt_client_id: $("#inp-mqtt-clientid").value.trim() || "shh-reader",
+  };
+  try {
+    await api("POST", "/mqtt", body);
+  } catch (e) { alert(e.message); }
+}
 
 async function start() {
   try { await api("POST", "/start"); updateRunningUI(true); }

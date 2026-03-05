@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from app_state import state
@@ -12,6 +12,7 @@ from db import save_settings
 from devices import get_device, list_devices
 from connections import USBSerialConnection, LANTCPConnection
 from transport.ws_client import ws_sender_loop
+from transport.mqtt_client import mqtt_publisher_loop
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
@@ -26,12 +27,25 @@ class ConfigPayload(BaseModel):
 
 
 class PairPayload(BaseModel):
-    host_url: str          # ws://host:port/api/readers/ws/{id}
-    encryption_key: str    # base64-encoded Fernet key
+    host_url: str
+    encryption_key: str
 
 
 class ConfirmPairPayload(BaseModel):
     code: str
+    host_url: str | None = None
+    encryption_key: str | None = None
+
+
+class MqttConfigPayload(BaseModel):
+    mqtt_enabled: bool = False
+    mqtt_broker: str = ""
+    mqtt_port: int = 1883
+    mqtt_username: str = ""
+    mqtt_password: str = ""
+    mqtt_topic1: str = ""
+    mqtt_topic2: str = ""
+    mqtt_client_id: str = "shh-reader"
 
 
 @router.get("/devices")
@@ -72,12 +86,76 @@ async def api_set_config(body: ConfigPayload):
     return {"ok": True, **state.config_summary()}
 
 
-@router.post("/pair")
-async def api_pair(body: PairPayload):
-    state.host_ws_url = body.host_url
-    state.encryption_key = body.encryption_key
-    code = state.generate_pair_code()
+@router.post("/mqtt")
+async def api_set_mqtt(body: MqttConfigPayload):
+    was_enabled = state.mqtt_enabled
+    state.mqtt_enabled = body.mqtt_enabled
+    state.mqtt_broker = body.mqtt_broker
+    state.mqtt_port = body.mqtt_port
+    state.mqtt_username = body.mqtt_username
+    state.mqtt_password = body.mqtt_password
+    state.mqtt_topic1 = body.mqtt_topic1
+    state.mqtt_topic2 = body.mqtt_topic2
+    state.mqtt_client_id = body.mqtt_client_id
     save_settings(state)
+    log.info("MQTT-CFG: enabled=%s broker=%s:%s topics=%s,%s",
+             state.mqtt_enabled, state.mqtt_broker, state.mqtt_port,
+             state.mqtt_topic1, state.mqtt_topic2)
+
+    # If reader is running, manage the MQTT task
+    if state.is_running:
+        if state.mqtt_enabled and (state.mqtt_task is None or state.mqtt_task.done()):
+            state.mqtt_task = asyncio.create_task(mqtt_publisher_loop())
+            log.info("MQTT-CFG: started MQTT publisher (reader already running)")
+        elif not state.mqtt_enabled and state.mqtt_task and not state.mqtt_task.done():
+            state.mqtt_task.cancel()
+            try:
+                await state.mqtt_task
+            except asyncio.CancelledError:
+                pass
+            state.mqtt_task = None
+            log.info("MQTT-CFG: stopped MQTT publisher")
+
+    return {"ok": True, **state.config_summary()}
+
+
+def _extract_reader_id(ws_url: str) -> int | None:
+    try:
+        parts = ws_url.rstrip("/").split("/")
+        return int(parts[-1])
+    except (ValueError, IndexError):
+        return None
+
+
+def _fix_ws_url(ws_url: str, real_ip: str) -> str:
+    """Replace unresolvable docker-internal hostnames with the caller's real IP."""
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(ws_url)
+    host = parsed.hostname or ""
+    if "docker.internal" in host or "localhost" in host or host == "127.0.0.1":
+        new_netloc = f"{real_ip}:{parsed.port}" if parsed.port else real_ip
+        fixed = urlunparse(parsed._replace(netloc=new_netloc))
+        log.info("PAIR: rewrote WS URL %s → %s (caller IP %s)", ws_url, fixed, real_ip)
+        return fixed
+    return ws_url
+
+
+@router.post("/pair")
+async def api_pair(body: PairPayload, request: Request):
+    caller_ip = request.client.host if request.client else None
+    log.info("PAIR: received host_url=%s from %s", body.host_url, caller_ip)
+    log.info("PAIR: encryption_key=%s...", body.encryption_key[:12] if body.encryption_key else "NONE")
+    ws_url = body.host_url
+    if caller_ip:
+        ws_url = _fix_ws_url(ws_url, caller_ip)
+    state.host_ws_url = ws_url
+    state.encryption_key = body.encryption_key
+    state.reader_id = _extract_reader_id(ws_url)
+    log.info("PAIR: extracted reader_id=%s from URL", state.reader_id)
+    code = state.generate_pair_code()
+    log.info("PAIR: generated code=%s", code)
+    save_settings(state)
+    log.info("PAIR: settings saved, returning code + device_name=%s", state.device_name)
     return {
         "code": code,
         "device_name": state.device_name,
@@ -86,21 +164,44 @@ async def api_pair(body: PairPayload):
 
 @router.post("/pair/confirm")
 async def api_confirm_pair(body: ConfirmPairPayload):
+    log.info("PAIR-CONFIRM: code=%s, host_url=%s, has_key=%s",
+             body.code, body.host_url, bool(body.encryption_key))
+    log.info("PAIR-CONFIRM: pending_code=%s, is_paired=%s, reader_id=%s",
+             state.pending_pair_code, state.is_paired, state.reader_id)
     if state.pending_pair_code is None:
+        log.warning("PAIR-CONFIRM: REJECTED — no pending code")
         raise HTTPException(400, "No pending pairing")
     if body.code != state.pending_pair_code:
+        log.warning("PAIR-CONFIRM: REJECTED — code mismatch (got %s, want %s)",
+                    body.code, state.pending_pair_code)
         raise HTTPException(400, "Code mismatch")
+    if body.host_url and body.host_url != state.host_ws_url:
+        log.info("PAIR-CONFIRM: updating host_ws_url from %s to %s",
+                 state.host_ws_url, body.host_url)
+        state.host_ws_url = body.host_url
+        state.reader_id = _extract_reader_id(body.host_url)
     state.is_paired = True
     state.pending_pair_code = None
     save_settings(state)
-    return {"ok": True, "is_paired": True}
+    log.info("PAIR-CONFIRM: SUCCESS — is_paired=%s, reader_id=%s, host_ws_url=%s",
+             state.is_paired, state.reader_id, state.host_ws_url)
+
+    # If reader is already running but WS sender wasn't started, start it now
+    if state.is_running and state.host_ws_url and (state.ws_task is None or state.ws_task.done()):
+        state.ws_task = asyncio.create_task(ws_sender_loop())
+        log.info("PAIR-CONFIRM: started WS sender (reader was already running)")
+
+    return {"success": True, "is_paired": True}
 
 
 @router.post("/unpair")
 async def api_unpair():
+    log.info("UNPAIR: clearing pairing (was reader_id=%s, paired=%s)",
+             state.reader_id, state.is_paired)
     await _stop_tasks()
     state.clear_pairing()
     save_settings(state)
+    log.info("UNPAIR: done")
     return {"ok": True}
 
 
@@ -116,14 +217,21 @@ async def api_start():
 
 async def _start_reader():
     state.is_running = True
-    log.info("Starting reader (%s / %s)", state.device_type, state.connection_mode)
+    log.info("START: device=%s, conn=%s, paired=%s, reader_id=%s",
+             state.device_type, state.connection_mode, state.is_paired, state.reader_id)
+    log.info("START: host_ws_url=%s", state.host_ws_url)
     state.reader_task = asyncio.create_task(_reader_loop())
 
     if state.is_paired and state.host_ws_url:
         state.ws_task = asyncio.create_task(ws_sender_loop())
-        log.info("WS sender started")
+        log.info("START: WS sender task created")
     else:
-        log.info("Not paired — reader running for diagnostics only")
+        log.info("START: no WS sender (paired=%s, url=%s)",
+                 state.is_paired, state.host_ws_url)
+
+    if state.mqtt_enabled and state.mqtt_broker:
+        state.mqtt_task = asyncio.create_task(mqtt_publisher_loop())
+        log.info("START: MQTT publisher task created")
 
     save_settings(state)
 
@@ -206,6 +314,10 @@ async def _reader_loop() -> None:
             state.latest_values = parsed
             await state.data_queue.put(parsed)
 
+            # Also feed MQTT queue if enabled
+            if state.mqtt_enabled:
+                await state.mqtt_queue.put(parsed)
+
             log.info(
                 "Parsed: SpO2=%s%s  BPM=%s%s  PA=%s",
                 parsed["spo2"],
@@ -222,12 +334,17 @@ async def _reader_loop() -> None:
     finally:
         await conn.disconnect()
         state.is_running = False
+        state.latest_values = {
+            "spo2": -1, "spo2_alarm": False,
+            "bpm": -1, "bpm_alarm": False,
+            "perfusion": -1,
+        }
         log.info("Reader: stopped")
 
 
 async def _stop_tasks() -> None:
     state.is_running = False
-    for task in (state.reader_task, state.ws_task):
+    for task in (state.reader_task, state.ws_task, state.mqtt_task):
         if task and not task.done():
             task.cancel()
             try:
@@ -236,3 +353,4 @@ async def _stop_tasks() -> None:
                 pass
     state.reader_task = None
     state.ws_task = None
+    state.mqtt_task = None

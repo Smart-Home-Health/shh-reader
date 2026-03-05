@@ -18,14 +18,16 @@ PING_INTERVAL = 25        # seconds between keepalive pings
 
 
 async def _send_encrypted(ws, payload: dict) -> None:
-    """Encrypt a dict and send as a binary frame."""
     f = state.fernet()
     if f is None:
-        log.warning("No encryption key — skipping send")
+        log.warning("WS-SEND: no encryption key — skipping %s", payload.get("type"))
         return
     raw = json.dumps(payload).encode()
     token = f.encrypt(raw)
+    log.info("WS-SEND: type=%s  plaintext=%d bytes  encrypted=%d bytes",
+             payload.get("type"), len(raw), len(token))
     await ws.send(token)
+    log.info("WS-SEND: sent OK")
 
 
 async def ws_sender_loop() -> None:
@@ -38,19 +40,25 @@ async def ws_sender_loop() -> None:
             await asyncio.sleep(5)
             continue
 
+        log.info("WS: connecting to %s (reader_id=%s, paired=%s)",
+                 url, state.reader_id, state.is_paired)
         try:
             async with websockets.connect(url) as ws:
                 log.info("WS: connected to %s", url)
                 backoff = RECONNECT_BASE
 
-                await _send_encrypted(ws, {
+                handshake = {
                     "type": "handshake",
                     "device_name": state.device_name,
                     "ts": datetime.now(timezone.utc).isoformat(),
-                })
+                }
+                log.info("WS: sending handshake: %s", handshake)
+                await _send_encrypted(ws, handshake)
 
                 listener = asyncio.create_task(_ws_listener(ws))
                 pinger = asyncio.create_task(_ws_pinger(ws))
+
+                log.info("WS: connected — entering send loop (queue size=%d)", state.data_queue.qsize())
 
                 try:
                     while state.is_running:
@@ -61,6 +69,7 @@ async def ws_sender_loop() -> None:
                         except asyncio.TimeoutError:
                             continue
 
+                        log.info("WS: dequeued data: %s (queue remaining=%d)", data, state.data_queue.qsize())
                         ts = datetime.now(timezone.utc).isoformat()
                         msg = {
                             "type": "sensor",
@@ -113,9 +122,9 @@ async def _ws_listener(ws) -> None:
                     msg = json.loads(f.decrypt(raw))
                 else:
                     msg = json.loads(raw)
-                log.debug("WS recv: %s", msg)
-            except Exception:
-                log.debug("WS recv (non-JSON): %s", raw[:120])
+                log.info("WS recv: %s", msg)
+            except Exception as e:
+                log.warning("WS recv decrypt/parse failed: %s — raw[:120]=%s", e, raw[:120])
     except asyncio.CancelledError:
         return
     except websockets.exceptions.ConnectionClosed:
@@ -126,6 +135,7 @@ async def _ws_pinger(ws) -> None:
     try:
         while True:
             await asyncio.sleep(PING_INTERVAL)
+            log.info("WS-PING: sending keepalive")
             await _send_encrypted(ws, {
                 "type": "ping",
             })

@@ -25,11 +25,22 @@ class AppState:
     pending_pair_code: str | None = None
     device_name: str = "shh-reader"
 
+    # MQTT optional output
+    mqtt_enabled: bool = False
+    mqtt_broker: str = ""
+    mqtt_port: int = 1883
+    mqtt_username: str = ""
+    mqtt_password: str = ""
+    mqtt_topic1: str = ""
+    mqtt_topic2: str = ""
+    mqtt_client_id: str = "shh-reader"
+
     is_running: bool = False
     raw_buffer: collections.deque = field(
         default_factory=lambda: collections.deque(maxlen=100)
     )
     data_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+    mqtt_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     latest_values: dict = field(default_factory=lambda: {
         "spo2": None, "spo2_alarm": False,
         "bpm": None, "bpm_alarm": False,
@@ -38,6 +49,7 @@ class AppState:
 
     reader_task: asyncio.Task | None = field(default=None, repr=False)
     ws_task: asyncio.Task | None = field(default=None, repr=False)
+    mqtt_task: asyncio.Task | None = field(default=None, repr=False)
     diagnostic_subscribers: list[Any] = field(default_factory=list)
 
     def fernet(self) -> Fernet | None:
@@ -69,6 +81,14 @@ class AppState:
             "is_paired": self.is_paired,
             "is_running": self.is_running,
             "device_name": self.device_name,
+            "mqtt_enabled": self.mqtt_enabled,
+            "mqtt_broker": self.mqtt_broker,
+            "mqtt_port": self.mqtt_port,
+            "mqtt_username": self.mqtt_username,
+            "mqtt_password": self.mqtt_password,
+            "mqtt_topic1": self.mqtt_topic1,
+            "mqtt_topic2": self.mqtt_topic2,
+            "mqtt_client_id": self.mqtt_client_id,
         }
 
 

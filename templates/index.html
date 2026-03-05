@@ -134,6 +134,38 @@
             </div>
           </section>
 
+          <section class="cfg-section">
+            <h3>MQTT Output</h3>
+            <label style="display:flex;align-items:center;gap:.5rem">
+              <input id="chk-mqtt" type="checkbox" />
+              Enable MQTT publishing
+            </label>
+            <div id="mqtt-opts" class="sub hidden" style="margin-top:.5rem">
+              <label>Broker address
+                <input id="inp-mqtt-broker" type="text" placeholder="192.168.1.100" />
+              </label>
+              <label>Broker port
+                <input id="inp-mqtt-port" type="number" value="1883" min="1" max="65535" />
+              </label>
+              <label>Username <small>(optional)</small>
+                <input id="inp-mqtt-user" type="text" placeholder="" />
+              </label>
+              <label>Password <small>(optional)</small>
+                <input id="inp-mqtt-pass" type="password" placeholder="" />
+              </label>
+              <label>Topic 1
+                <input id="inp-mqtt-topic1" type="text" placeholder="shh/vitals" />
+              </label>
+              <label>Topic 2 <small>(optional)</small>
+                <input id="inp-mqtt-topic2" type="text" placeholder="" />
+              </label>
+              <label>Client ID
+                <input id="inp-mqtt-clientid" type="text" value="shh-reader" />
+              </label>
+              <button id="btn-save-mqtt" class="primary" style="margin-top:.75rem">Save MQTT</button>
+            </div>
+          </section>
+
         </div>
       </div>
     </div>
