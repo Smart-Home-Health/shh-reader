@@ -24,12 +24,18 @@ class LANTCPConnection(BaseConnection):
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         peer = writer.get_extra_info("peername")
-        if self._reader is not None:
-            log.warning("LAN: rejecting second client %s (already connected)", peer)
-            writer.close()
-            await writer.wait_closed()
-            return
-        log.info("LAN: device connected from %s", peer)
+        if self._writer is not None:
+            log.info(
+                "LAN: device reconnected from %s — replacing stale connection", peer
+            )
+            old_writer = self._writer
+            try:
+                old_writer.close()
+                await old_writer.wait_closed()
+            except Exception:
+                pass
+        else:
+            log.info("LAN: device connected from %s", peer)
         self._reader = reader
         self._writer = writer
         self._client_connected.set()
@@ -62,33 +68,42 @@ class LANTCPConnection(BaseConnection):
             log.info("LAN: TCP server stopped")
 
     async def read_lines(self) -> AsyncGenerator[str, None]:
-        log.info("LAN: waiting for device to connect…")
-        # Wait for a device to connect, but allow cancellation
-        try:
-            await self._client_connected.wait()
-        except asyncio.CancelledError:
-            log.info("LAN: cancelled while waiting for device")
-            return
-
-        assert self._reader is not None
-        log.info("LAN: reading data stream")
-        buffer = ""
         while not self._stop:
-            try:
-                data = await self._reader.read(4096)
-            except asyncio.CancelledError:
-                log.info("LAN: read cancelled")
-                break
-            except ConnectionError as e:
-                log.warning("LAN: connection error: %s", e)
-                break
-            if not data:
-                log.info("LAN: device disconnected (EOF)")
-                break
-            buffer += data.decode(errors="ignore")
-            while "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                stripped = line.strip()
-                if stripped:
-                    yield stripped
+            self._client_connected.clear()
+            if self._reader is None:
+                log.info("LAN: waiting for device to connect…")
+                try:
+                    await self._client_connected.wait()
+                except asyncio.CancelledError:
+                    log.info("LAN: cancelled while waiting for device")
+                    return
+
+            assert self._reader is not None
+            reader = self._reader          # local ref for this session
+            log.info("LAN: reading data stream")
+            buffer = ""
+            while not self._stop:
+                try:
+                    data = await reader.read(4096)
+                except asyncio.CancelledError:
+                    log.info("LAN: read cancelled")
+                    return
+                except ConnectionError as e:
+                    log.warning("LAN: connection error: %s", e)
+                    break
+                if not data:
+                    log.info("LAN: device disconnected (EOF)")
+                    break
+                buffer += data.decode(errors="ignore")
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+                    stripped = line.strip()
+                    if stripped:
+                        yield stripped
+
+            # only clear state if no new connection has already replaced ours
+            if self._reader is reader:
+                self._reader = None
+                self._writer = None
+            log.info("LAN: waiting for device to reconnect…")
         log.info("LAN: read_lines loop ended")

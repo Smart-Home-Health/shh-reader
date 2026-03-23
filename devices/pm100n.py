@@ -27,7 +27,11 @@ class PM100N(BaseDevice):
         spo2_raw, bpm_raw, pa_raw = m.group(1), m.group(2), m.group(3)
 
         if spo2_raw == "---" or bpm_raw == "---":
-            return None
+            return {
+                "spo2": -1, "spo2_alarm": False,
+                "bpm": -1, "bpm_alarm": False,
+                "perfusion": -1,
+            }
 
         return {
             "spo2": int(spo2_raw.rstrip("*")),

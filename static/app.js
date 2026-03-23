@@ -9,7 +9,7 @@ const HISTORY_SEC = 300;
 const POLL_MS = 1000;
 const history = { spo2: [], bpm: [], perfusion: [] };
 const graphColors = { spo2: "#60a5fa", bpm: "#34d399", perfusion: "#fb923c" };
-const graphRanges = { spo2: [80, 100], bpm: [40, 160], perfusion: [0, 20] };
+const graphRanges = { spo2: [80, 100], bpm: [40, 180], perfusion: [0, 100] };
 
 document.addEventListener("DOMContentLoaded", async () => {
   await loadDevices();
@@ -170,6 +170,7 @@ function sizeCanvases() {
 }
 
 function pushHistory(key, value) {
+  if (value == null || value < 0) return;   // skip sentinel / missing
   const now = Date.now();
   const arr = history[key];
   arr.push({ t: now, v: value });
@@ -177,11 +178,26 @@ function pushHistory(key, value) {
   while (arr.length && arr[0].t < cutoff) arr.shift();
 }
 
+function ensureCanvasSize(canvas) {
+  const parent = canvas.parentElement;
+  const w = parent.offsetWidth;
+  const h = parent.offsetHeight;
+  if (w === 0 || h === 0) return;
+  const bw = Math.round(w * devicePixelRatio);
+  const bh = Math.round(h * devicePixelRatio);
+  if (canvas.width !== bw || canvas.height !== bh) {
+    canvas.width = bw;
+    canvas.height = bh;
+  }
+}
+
 function drawGraph(canvasId, key, color) {
   const canvas = $("#graph-" + canvasId);
   if (!canvas) return;
+  ensureCanvasSize(canvas);
   const ctx = canvas.getContext("2d");
   const w = canvas.width, h = canvas.height;
+  if (w === 0 || h === 0) return;
   ctx.clearRect(0, 0, w, h);
 
   const arr = history[key];
@@ -189,7 +205,15 @@ function drawGraph(canvasId, key, color) {
 
   const now = Date.now();
   const tMin = now - HISTORY_SEC * 1000;
-  const [vMin, vMax] = graphRanges[key];
+
+  // Auto-range: use configured range but expand if data exceeds it
+  let [vMin, vMax] = graphRanges[key];
+  const dataMin = Math.min(...arr.map(p => p.v));
+  const dataMax = Math.max(...arr.map(p => p.v));
+  const pad10 = Math.max(1, (dataMax - dataMin) * 0.1);
+  if (dataMin < vMin) vMin = Math.floor(dataMin - pad10);
+  if (dataMax > vMax) vMax = Math.ceil(dataMax + pad10);
+  if (vMax - vMin < 2) { vMin -= 1; vMax += 1; }
   const pad = 4 * devicePixelRatio;
 
   // grid lines
