@@ -63,18 +63,29 @@ async def mqtt_publisher_loop() -> None:
                 except asyncio.TimeoutError:
                     continue
 
+                origin = state.mqtt_client_id or "shh-reader"
+
                 payload = json.dumps({
                     "timestamp": time.time(),
                     "spo2": parsed.get("spo2"),
                     "bpm": parsed.get("bpm"),
                     "perfusion": parsed.get("perfusion"),
-                    "origin": state.mqtt_client_id or "shh-reader",
+                    "origin": origin,
                 })
 
                 topics = [t for t in (state.mqtt_topic1, state.mqtt_topic2) if t]
                 for topic in topics:
                     info = client.publish(topic, payload, qos=1)
                     log.info("MQTT-PUB: topic=%s payload=%s mid=%s", topic, payload, info.mid)
+
+                if state.mqtt_topic3:
+                    pa_payload = json.dumps({
+                        "timestamp": time.time(),
+                        "perfusion": parsed.get("perfusion"),
+                        "origin": origin,
+                    })
+                    info = client.publish(state.mqtt_topic3, pa_payload, qos=1)
+                    log.info("MQTT-PUB: topic=%s payload=%s mid=%s", state.mqtt_topic3, pa_payload, info.mid)
 
         except asyncio.CancelledError:
             log.info("MQTT: publisher cancelled")

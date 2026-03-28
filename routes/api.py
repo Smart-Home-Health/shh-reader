@@ -45,6 +45,7 @@ class MqttConfigPayload(BaseModel):
     mqtt_password: str = ""
     mqtt_topic1: str = ""
     mqtt_topic2: str = ""
+    mqtt_topic3: str = ""
     mqtt_client_id: str = "shh-reader"
 
 
@@ -96,25 +97,28 @@ async def api_set_mqtt(body: MqttConfigPayload):
     state.mqtt_password = body.mqtt_password
     state.mqtt_topic1 = body.mqtt_topic1
     state.mqtt_topic2 = body.mqtt_topic2
+    state.mqtt_topic3 = body.mqtt_topic3
     state.mqtt_client_id = body.mqtt_client_id
     save_settings(state)
-    log.info("MQTT-CFG: enabled=%s broker=%s:%s topics=%s,%s",
+    log.info("MQTT-CFG: enabled=%s broker=%s:%s topics=%s,%s,%s",
              state.mqtt_enabled, state.mqtt_broker, state.mqtt_port,
-             state.mqtt_topic1, state.mqtt_topic2)
+             state.mqtt_topic1, state.mqtt_topic2, state.mqtt_topic3)
 
     # If reader is running, manage the MQTT task
     if state.is_running:
-        if state.mqtt_enabled and (state.mqtt_task is None or state.mqtt_task.done()):
-            state.mqtt_task = asyncio.create_task(mqtt_publisher_loop())
-            log.info("MQTT-CFG: started MQTT publisher (reader already running)")
-        elif not state.mqtt_enabled and state.mqtt_task and not state.mqtt_task.done():
+        # Always stop the existing task so it picks up fresh config
+        if state.mqtt_task and not state.mqtt_task.done():
             state.mqtt_task.cancel()
             try:
                 await state.mqtt_task
             except asyncio.CancelledError:
                 pass
             state.mqtt_task = None
-            log.info("MQTT-CFG: stopped MQTT publisher")
+            log.info("MQTT-CFG: stopped existing MQTT publisher for config reload")
+
+        if state.mqtt_enabled:
+            state.mqtt_task = asyncio.create_task(mqtt_publisher_loop())
+            log.info("MQTT-CFG: started MQTT publisher (reader already running)")
 
     return {"ok": True, **state.config_summary()}
 

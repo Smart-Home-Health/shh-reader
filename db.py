@@ -14,7 +14,7 @@ _PERSISTED_KEYS = [
     "lan_listen_port", "host_ws_url", "encryption_key", "reader_id",
     "is_paired", "device_name", "auto_start",
     "mqtt_enabled", "mqtt_broker", "mqtt_port", "mqtt_username",
-    "mqtt_password", "mqtt_topic1", "mqtt_topic2", "mqtt_client_id",
+    "mqtt_password", "mqtt_topic1", "mqtt_topic2", "mqtt_topic3", "mqtt_client_id",
 ]
 
 

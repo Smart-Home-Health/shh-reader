@@ -279,9 +279,10 @@ function loadMqttUI(cfg) {
   if (cfg.mqtt_broker != null) $("#inp-mqtt-broker").value = cfg.mqtt_broker;
   if (cfg.mqtt_port != null) $("#inp-mqtt-port").value = cfg.mqtt_port;
   if (cfg.mqtt_username != null) $("#inp-mqtt-user").value = cfg.mqtt_username;
-  if (cfg.mqtt_password != null) $("#inp-mqtt-pass").value = cfg.mqtt_password;
+  if (cfg.mqtt_password != null && cfg.mqtt_password !== "") $("#inp-mqtt-pass").value = cfg.mqtt_password;
   if (cfg.mqtt_topic1 != null) $("#inp-mqtt-topic1").value = cfg.mqtt_topic1;
   if (cfg.mqtt_topic2 != null) $("#inp-mqtt-topic2").value = cfg.mqtt_topic2;
+  if (cfg.mqtt_topic3 != null) $("#inp-mqtt-topic3").value = cfg.mqtt_topic3;
   if (cfg.mqtt_client_id != null) $("#inp-mqtt-clientid").value = cfg.mqtt_client_id;
 }
 
@@ -298,6 +299,7 @@ async function saveMqtt() {
     mqtt_password: $("#inp-mqtt-pass").value,
     mqtt_topic1: $("#inp-mqtt-topic1").value.trim(),
     mqtt_topic2: $("#inp-mqtt-topic2").value.trim(),
+    mqtt_topic3: $("#inp-mqtt-topic3").value.trim(),
     mqtt_client_id: $("#inp-mqtt-clientid").value.trim() || "shh-reader",
   };
   try {

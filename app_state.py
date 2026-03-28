@@ -33,6 +33,7 @@ class AppState:
     mqtt_password: str = ""
     mqtt_topic1: str = ""
     mqtt_topic2: str = ""
+    mqtt_topic3: str = ""
     mqtt_client_id: str = "shh-reader"
 
     is_running: bool = False
@@ -88,6 +89,7 @@ class AppState:
             "mqtt_password": self.mqtt_password,
             "mqtt_topic1": self.mqtt_topic1,
             "mqtt_topic2": self.mqtt_topic2,
+            "mqtt_topic3": self.mqtt_topic3,
             "mqtt_client_id": self.mqtt_client_id,
         }
 
