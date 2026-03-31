@@ -206,14 +206,14 @@ function drawGraph(canvasId, key, color) {
   const now = Date.now();
   const tMin = now - HISTORY_SEC * 1000;
 
-  // Auto-range: use configured range but expand if data exceeds it
-  let [vMin, vMax] = graphRanges[key];
+  // Auto-range: scale to actual data with padding so small changes are visible
   const dataMin = Math.min(...arr.map(p => p.v));
   const dataMax = Math.max(...arr.map(p => p.v));
-  const pad10 = Math.max(1, (dataMax - dataMin) * 0.1);
-  if (dataMin < vMin) vMin = Math.floor(dataMin - pad10);
-  if (dataMax > vMax) vMax = Math.ceil(dataMax + pad10);
-  if (vMax - vMin < 2) { vMin -= 1; vMax += 1; }
+  const span = dataMax - dataMin;
+  const padding = Math.max(1, span * 0.15);
+  let vMin = Math.floor(dataMin - padding);
+  let vMax = Math.ceil(dataMax + padding);
+  if (vMax - vMin < 3) { vMin -= 2; vMax += 2; }
   const pad = 4 * devicePixelRatio;
 
   // grid lines
