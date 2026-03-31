@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SHH Reader</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="dashboard-wrapper">
+
+    <!-- Header -->
+    <header class="header-section">
+      <div class="logo-container">
+        <svg class="header-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+        </svg>
+        <span class="logo-text">SHH Reader</span>
+      </div>
+
+      <div class="menu-container">
+        <button id="btn-diag-open" class="menu-button" aria-label="Diagnostics" title="Diagnostics">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        </button>
+        <button id="btn-settings-open" class="menu-button" aria-label="Settings" title="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.573-1.066z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
+      </div>
+
+      <div class="status-container">
+        <span id="status-badge" class="badge off">Stopped</span>
+      </div>
+    </header>
+
+    <!-- Dashboard vitals -->
+    <main class="dashboard-container">
+      <div class="value-display spo2">
+        <div class="tile-left">
+          <h3 class="value-title">SpO&#x2082;</h3>
+          <div class="value-content">
+            <div id="val-spo2" class="value">--</div>
+            <div class="unit">%</div>
+          </div>
+          <div id="alarm-spo2" class="alarm-indicator hidden">ALARM</div>
+        </div>
+        <div class="tile-graph"><canvas id="graph-spo2"></canvas></div>
+      </div>
+
+      <div class="value-display bpm">
+        <div class="tile-left">
+          <h3 class="value-title">Heart Rate</h3>
+          <div class="value-content">
+            <div id="val-bpm" class="value">--</div>
+            <div class="unit">BPM</div>
+          </div>
+          <div id="alarm-bpm" class="alarm-indicator hidden">ALARM</div>
+        </div>
+        <div class="tile-graph"><canvas id="graph-bpm"></canvas></div>
+      </div>
+
+      <div class="value-display perfusion">
+        <div class="tile-left">
+          <h3 class="value-title">Perfusion</h3>
+          <div class="value-content">
+            <div id="val-perf" class="value">--</div>
+            <div class="unit">PA</div>
+          </div>
+        </div>
+        <div class="tile-graph"><canvas id="graph-perf"></canvas></div>
+      </div>
+    </main>
+
+    <!-- Settings Modal -->
+    <div id="modal-settings" class="modal-overlay hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Settings</h2>
+          <button id="btn-settings-close" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+
+          <section class="cfg-section">
+            <h3>Device</h3>
+            <select id="sel-device"><option value="">— choose —</option></select>
+          </section>
+
+          <section id="sec-connection" class="cfg-section hidden">
+            <h3>Connection</h3>
+            <div id="conn-mode-wrap">
+              <label><input type="radio" name="conn" value="usb" /> USB Serial</label>
+              <label><input type="radio" name="conn" value="lan" /> Serial-over-LAN</label>
+            </div>
+
+            <div id="usb-opts" class="sub hidden">
+              <label>Port
+                <span style="display:flex;gap:6px;align-items:center">
+                  <select id="sel-port" style="flex:1"><option value="">—</option></select>
+                  <button id="btn-refresh-ports" type="button" title="Refresh">&#x21bb;</button>
+                </span>
+              </label>
+              <label>Baud rate
+                <select id="sel-baud">
+                  <option value="9600">9600</option>
+                  <option value="19200">19200</option>
+                  <option value="38400">38400</option>
+                  <option value="57600">57600</option>
+                  <option value="115200" selected>115200</option>
+                </select>
+              </label>
+            </div>
+
+            <div id="lan-opts" class="sub hidden">
+              <label>Listen port
+                <input id="inp-lan-port" type="number" value="5001" min="1" max="65535" />
+              </label>
+              <p class="hint">The device will connect to this port.</p>
+            </div>
+
+            <button id="btn-save-config" class="primary" style="margin-top:.75rem">Save Configuration</button>
+          </section>
+
+          <section class="cfg-section">
+            <h3>Pairing</h3>
+            <p id="pair-text">Not paired. Initiate pairing from the host app.</p>
+            <p id="pair-code" class="code hidden"></p>
+            <button id="btn-unpair" class="danger hidden" style="margin-top:.5rem">Unpair</button>
+          </section>
+
+          <section class="cfg-section">
+            <h3>Controls</h3>
+            <div style="display:flex;gap:.5rem">
+              <button id="btn-start" class="primary">Start</button>
+              <button id="btn-stop" class="danger" disabled>Stop</button>
+            </div>
+          </section>
+
+          <section class="cfg-section">
+            <h3>MQTT Output</h3>
+            <label style="display:flex;align-items:center;gap:.5rem">
+              <input id="chk-mqtt" type="checkbox" />
+              Enable MQTT publishing
+            </label>
+            <div id="mqtt-opts" class="sub hidden" style="margin-top:.5rem">
+              <label>Broker address
+                <input id="inp-mqtt-broker" type="text" placeholder="192.168.1.100" />
+              </label>
+              <label>Broker port
+                <input id="inp-mqtt-port" type="number" value="1883" min="1" max="65535" />
+              </label>
+              <label>Username <small>(optional)</small>
+                <input id="inp-mqtt-user" type="text" placeholder="" />
+              </label>
+              <label>Password <small>(optional)</small>
+                <input id="inp-mqtt-pass" type="password" placeholder="" />
+              </label>
+              <label>Topic 1
+                <input id="inp-mqtt-topic1" type="text" placeholder="shh/vitals" />
+              </label>
+              <label>Topic 2 <small>(optional)</small>
+                <input id="inp-mqtt-topic2" type="text" placeholder="" />
+              </label>
+              <label>Topic 3 – PA state <small>(optional, perfusion only)</small>
+                <input id="inp-mqtt-topic3" type="text" placeholder="shh/pa/state" />
+              </label>
+              <label>Client ID
+                <input id="inp-mqtt-clientid" type="text" value="shh-reader" />
+              </label>
+              <button id="btn-save-mqtt" class="primary" style="margin-top:.75rem">Save MQTT</button>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Diagnostics Modal -->
+    <div id="modal-diag" class="modal-overlay hidden">
+      <div class="modal-content modal-wide">
+        <div class="modal-header">
+          <h2>Diagnostics <small>(last 100 raw lines)</small></h2>
+          <button id="btn-diag-close" class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div id="diag-log"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  <script src="/static/app.js?v=2"></script>
+</body>
+</html>

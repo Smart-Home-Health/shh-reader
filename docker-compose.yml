@@ -1,0 +1,14 @@
+services:
+  shh-lan:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - shh-data:/app/shh_reader.db
+    devices:
+      - /dev/ttyUSB0:/dev/ttyUSB0
+    restart: unless-stopped
+    network_mode: host
+
+volumes:
+  shh-data:
