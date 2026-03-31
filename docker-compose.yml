@@ -3,12 +3,12 @@ services:
     build: .
     ports:
       - "8080:8080"
+      - "5001:5001"
     volumes:
       - shh-data:/app/shh_reader.db
-    devices:
-      - /dev/ttyUSB0:/dev/ttyUSB0
+#    devices:
+#      - /dev/ttyUSB0:/dev/ttyUSB0
     restart: unless-stopped
-    network_mode: host
 
 volumes:
   shh-data:
