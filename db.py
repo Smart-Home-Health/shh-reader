@@ -6,7 +6,9 @@ import sqlite3
 from pathlib import Path
 from urllib.parse import urlparse
 
-DB_PATH = Path(__file__).parent / "shh_reader.db"
+_DATA_DIR = Path(__file__).parent / "data"
+_DATA_DIR.mkdir(exist_ok=True)
+DB_PATH = _DATA_DIR / "shh_reader.db"
 log = logging.getLogger(__name__)
 
 _PERSISTED_KEYS = [
