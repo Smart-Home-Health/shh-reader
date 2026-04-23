@@ -42,10 +42,14 @@ async def ws_sender_loop() -> None:
 
         log.info("WS: connecting to %s (reader_id=%s, paired=%s)",
                  url, state.reader_id, state.is_paired)
+        state.ws_state = "connecting"
         try:
             async with websockets.connect(url) as ws:
                 log.info("WS: connected to %s", url)
                 backoff = RECONNECT_BASE
+                state.ws_state = "connected"
+                state.ws_last_error = None
+                state.ws_connected_since = datetime.now(timezone.utc).isoformat()
 
                 handshake = {
                     "type": "handshake",
@@ -102,14 +106,21 @@ async def ws_sender_loop() -> None:
             websockets.exceptions.WebSocketException,
             ConnectionError,
         ) as exc:
+            state.ws_state = "retrying"
+            state.ws_last_error = str(exc)
+            state.ws_connected_since = None
             log.warning("WS: connection error: %s — retrying in %ds", exc, backoff)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, RECONNECT_MAX)
 
         except asyncio.CancelledError:
             log.info("WS: sender task cancelled")
+            state.ws_state = "disconnected"
+            state.ws_connected_since = None
             return
 
+    state.ws_state = "disconnected"
+    state.ws_connected_since = None
     log.info("WS: sender stopped (is_running=False)")
 
 

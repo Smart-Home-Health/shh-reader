@@ -167,7 +167,7 @@ async def api_pair(body: PairPayload, request: Request):
 
 
 @router.post("/pair/confirm")
-async def api_confirm_pair(body: ConfirmPairPayload):
+async def api_confirm_pair(body: ConfirmPairPayload, request: Request):
     log.info("PAIR-CONFIRM: code=%s, host_url=%s, has_key=%s",
              body.code, body.host_url, bool(body.encryption_key))
     log.info("PAIR-CONFIRM: pending_code=%s, is_paired=%s, reader_id=%s",
@@ -182,8 +182,8 @@ async def api_confirm_pair(body: ConfirmPairPayload):
     if body.host_url and body.host_url != state.host_ws_url:
         log.info("PAIR-CONFIRM: updating host_ws_url from %s to %s",
                  state.host_ws_url, body.host_url)
-        state.host_ws_url = body.host_url
-        state.reader_id = _extract_reader_id(body.host_url)
+        state.host_ws_url = _fix_ws_url(body.host_url, request.client.host) if request.client else body.host_url
+        state.reader_id = _extract_reader_id(state.host_ws_url)
     state.is_paired = True
     state.pending_pair_code = None
     save_settings(state)
@@ -247,6 +247,22 @@ async def api_stop():
     return {"ok": True, "is_running": False}
 
 
+@router.get("/status")
+async def api_status():
+    return {
+        "is_running": state.is_running,
+        "is_paired": state.is_paired,
+        "reader_id": state.reader_id,
+        "host_ws_url": state.host_ws_url,
+        "ws_state": state.ws_state,
+        "ws_last_error": state.ws_last_error,
+        "ws_connected_since": state.ws_connected_since,
+        "mqtt_enabled": state.mqtt_enabled,
+        "mqtt_running": state.mqtt_task is not None and not state.mqtt_task.done() if state.mqtt_task else False,
+        "data_queue_size": state.data_queue.qsize(),
+    }
+
+
 @router.get("/latest")
 async def api_latest():
     return state.latest_values
@@ -286,64 +302,91 @@ async def _reader_loop() -> None:
     device = get_device(state.device_type)
     if device is None:
         log.error("No device selected")
+        state.is_running = False
         return
 
     if state.connection_mode == "usb":
         if not state.usb_port:
             log.error("No USB port configured")
+            state.is_running = False
             return
-        conn = USBSerialConnection(state.usb_port, state.baud_rate)
     elif state.connection_mode == "lan":
-        conn = LANTCPConnection(listen_port=state.lan_listen_port)
+        pass
     else:
         log.error("Unknown connection mode: %s", state.connection_mode)
+        state.is_running = False
         return
 
-    try:
-        await conn.connect()
-        log.info("Reader: connection open (%s)", state.connection_mode)
+    backoff = 1  # seconds, doubles on each failure up to 30s
 
-        async for line in conn.read_lines():
-            if not state.is_running:
+    while state.is_running:
+        if state.connection_mode == "usb":
+            conn = USBSerialConnection(state.usb_port, state.baud_rate)
+        else:
+            conn = LANTCPConnection(listen_port=state.lan_listen_port)
+
+        try:
+            await conn.connect()
+            backoff = 1  # reset on successful connection
+            log.info("Reader: connection open (%s)", state.connection_mode)
+
+            async for line in conn.read_lines():
+                if not state.is_running:
+                    break
+
+                state.raw_buffer.append(line)
+                await _broadcast_raw(line)
+                log.info("Raw: %s", line)
+
+                parsed = device.parse_line(line)
+                if parsed is None:
+                    continue
+
+                state.latest_values = parsed
+                await state.data_queue.put(parsed)
+
+                # Also feed MQTT queue if enabled
+                if state.mqtt_enabled:
+                    await state.mqtt_queue.put(parsed)
+
+                log.info(
+                    "Parsed: SpO2=%s%s  BPM=%s%s  PA=%s",
+                    parsed["spo2"],
+                    "*" if parsed["spo2_alarm"] else "",
+                    parsed["bpm"],
+                    "*" if parsed["bpm_alarm"] else "",
+                    parsed["perfusion"],
+                )
+
+        except asyncio.CancelledError:
+            log.info("Reader: cancelled")
+            break
+        except Exception as exc:
+            log.exception("Reader error: %s", exc)
+        finally:
+            await conn.disconnect()
+
+        # If we're still supposed to be running, retry with backoff
+        if state.is_running:
+            log.info("Reader: reconnecting in %ds...", backoff)
+            state.latest_values = {
+                "spo2": -1, "spo2_alarm": False,
+                "bpm": -1, "bpm_alarm": False,
+                "perfusion": -1,
+            }
+            try:
+                await asyncio.sleep(backoff)
+            except asyncio.CancelledError:
                 break
+            backoff = min(backoff * 2, 30)
 
-            state.raw_buffer.append(line)
-            await _broadcast_raw(line)
-            log.info("Raw: %s", line)
-
-            parsed = device.parse_line(line)
-            if parsed is None:
-                continue
-
-            state.latest_values = parsed
-            await state.data_queue.put(parsed)
-
-            # Also feed MQTT queue if enabled
-            if state.mqtt_enabled:
-                await state.mqtt_queue.put(parsed)
-
-            log.info(
-                "Parsed: SpO2=%s%s  BPM=%s%s  PA=%s",
-                parsed["spo2"],
-                "*" if parsed["spo2_alarm"] else "",
-                parsed["bpm"],
-                "*" if parsed["bpm_alarm"] else "",
-                parsed["perfusion"],
-            )
-
-    except asyncio.CancelledError:
-        log.info("Reader: cancelled")
-    except Exception as exc:
-        log.exception("Reader error: %s", exc)
-    finally:
-        await conn.disconnect()
-        state.is_running = False
-        state.latest_values = {
-            "spo2": -1, "spo2_alarm": False,
-            "bpm": -1, "bpm_alarm": False,
-            "perfusion": -1,
-        }
-        log.info("Reader: stopped")
+    state.is_running = False
+    state.latest_values = {
+        "spo2": -1, "spo2_alarm": False,
+        "bpm": -1, "bpm_alarm": False,
+        "perfusion": -1,
+    }
+    log.info("Reader: stopped")
 
 
 async def _stop_tasks() -> None:

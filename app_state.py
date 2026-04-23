@@ -48,6 +48,10 @@ class AppState:
         "perfusion": None,
     })
 
+    ws_state: str = "disconnected"       # disconnected | connecting | connected | retrying
+    ws_last_error: str | None = None
+    ws_connected_since: str | None = None
+
     reader_task: asyncio.Task | None = field(default=None, repr=False)
     ws_task: asyncio.Task | None = field(default=None, repr=False)
     mqtt_task: asyncio.Task | None = field(default=None, repr=False)
