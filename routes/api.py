@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from app_state import state
+from app_state import PendingPair, state
 from db import save_settings
+from pairing import PAIR_PROTOCOL_VERSION, derive_fernet_key, public_key_b64
 from devices import get_device, list_devices
 from connections import USBSerialConnection, LANTCPConnection
 from transport.ws_client import ws_sender_loop
@@ -28,13 +31,12 @@ class ConfigPayload(BaseModel):
 
 class PairPayload(BaseModel):
     host_url: str
-    encryption_key: str
+    hub_public_key: str
+    protocol_version: int = 1
 
 
-class ConfirmPairPayload(BaseModel):
-    code: str
-    host_url: str | None = None
-    encryption_key: str | None = None
+class PairRespondPayload(BaseModel):
+    accept: bool
 
 
 class MqttConfigPayload(BaseModel):
@@ -146,56 +148,76 @@ def _fix_ws_url(ws_url: str, real_ip: str) -> str:
 
 @router.post("/pair")
 async def api_pair(body: PairPayload, request: Request):
+    if body.protocol_version != PAIR_PROTOCOL_VERSION:
+        raise HTTPException(
+            400,
+            f"Unsupported pairing protocol version {body.protocol_version} "
+            f"(reader expects {PAIR_PROTOCOL_VERSION}); update the hub",
+        )
     caller_ip = request.client.host if request.client else None
-    log.info("PAIR: received host_url=%s from %s", body.host_url, caller_ip)
-    log.info("PAIR: encryption_key=%s...", body.encryption_key[:12] if body.encryption_key else "NONE")
+    log.info("PAIR: request from %s host_url=%s", caller_ip, body.host_url)
     ws_url = body.host_url
     if caller_ip:
         ws_url = _fix_ws_url(ws_url, caller_ip)
-    state.host_ws_url = ws_url
-    state.encryption_key = body.encryption_key
-    state.reader_id = _extract_reader_id(ws_url)
-    log.info("PAIR: extracted reader_id=%s from URL", state.reader_id)
-    code = state.generate_pair_code()
-    log.info("PAIR: generated code=%s", code)
-    save_settings(state)
-    log.info("PAIR: settings saved, returning code + device_name=%s", state.device_name)
-    return {
-        "code": code,
-        "device_name": state.device_name,
-    }
+    # Nothing is persisted yet — the request just waits for the user to
+    # Allow/Deny on the reader UI. A newer request replaces an older one,
+    # and pairing while already paired is the re-pair path (existing
+    # pairing stays intact until Allow).
+    state.pending_pair = PendingPair(
+        hub_public_key=body.hub_public_key,
+        host_ws_url=ws_url,
+        reader_id=_extract_reader_id(ws_url),
+        caller_ip=caller_ip,
+        requested_at=time.monotonic(),
+    )
+    return {"status": "pending", "device_name": state.device_name}
 
 
-@router.post("/pair/confirm")
-async def api_confirm_pair(body: ConfirmPairPayload, request: Request):
-    log.info("PAIR-CONFIRM: code=%s, host_url=%s, has_key=%s",
-             body.code, body.host_url, bool(body.encryption_key))
-    log.info("PAIR-CONFIRM: pending_code=%s, is_paired=%s, reader_id=%s",
-             state.pending_pair_code, state.is_paired, state.reader_id)
-    if state.pending_pair_code is None:
-        log.warning("PAIR-CONFIRM: REJECTED — no pending code")
-        raise HTTPException(400, "No pending pairing")
-    if body.code != state.pending_pair_code:
-        log.warning("PAIR-CONFIRM: REJECTED — code mismatch (got %s, want %s)",
-                    body.code, state.pending_pair_code)
-        raise HTTPException(400, "Code mismatch")
-    if body.host_url and body.host_url != state.host_ws_url:
-        log.info("PAIR-CONFIRM: updating host_ws_url from %s to %s",
-                 state.host_ws_url, body.host_url)
-        state.host_ws_url = _fix_ws_url(body.host_url, request.client.host) if request.client else body.host_url
-        state.reader_id = _extract_reader_id(state.host_ws_url)
+@router.get("/pair/status")
+async def api_pair_status():
+    pending = state.active_pending_pair()
+    if pending is None:
+        return {"status": "none"}
+    if pending.status == "pending":
+        return {"status": "pending"}
+    if pending.status == "approved":
+        # Idempotent until TTL so the hub's poll can retry; a public key
+        # is not secret.
+        return {"status": "approved", "reader_public_key": pending.reader_public_key}
+    state.pending_pair = None  # report a denial once, then clear it
+    return {"status": "denied"}
+
+
+@router.post("/pair/respond")
+async def api_pair_respond(body: PairRespondPayload):
+    pending = state.active_pending_pair()
+    if pending is None or pending.status != "pending":
+        raise HTTPException(400, "No pending pairing request")
+
+    if not body.accept:
+        pending.status = "denied"
+        log.info("PAIR: denied by user (hub %s)", pending.caller_ip)
+        return {"ok": True, "is_paired": state.is_paired}
+
+    # Derive the shared Fernet key from the hub's public key; the ephemeral
+    # private key is discarded — only the derived key persists.
+    priv = X25519PrivateKey.generate()
+    state.encryption_key = derive_fernet_key(priv, pending.hub_public_key)
+    state.host_ws_url = pending.host_ws_url
+    state.reader_id = pending.reader_id
     state.is_paired = True
-    state.pending_pair_code = None
+    pending.reader_public_key = public_key_b64(priv)
+    pending.status = "approved"
     save_settings(state)
-    log.info("PAIR-CONFIRM: SUCCESS — is_paired=%s, reader_id=%s, host_ws_url=%s",
-             state.is_paired, state.reader_id, state.host_ws_url)
+    log.info("PAIR: approved by user — reader_id=%s, host_ws_url=%s (hub %s)",
+             state.reader_id, state.host_ws_url, pending.caller_ip)
 
     # If reader is already running but WS sender wasn't started, start it now
     if state.is_running and state.host_ws_url and (state.ws_task is None or state.ws_task.done()):
         state.ws_task = asyncio.create_task(ws_sender_loop())
-        log.info("PAIR-CONFIRM: started WS sender (reader was already running)")
+        log.info("PAIR: started WS sender (reader was already running)")
 
-    return {"success": True, "is_paired": True}
+    return {"ok": True, "is_paired": True}
 
 
 @router.post("/unpair")
@@ -263,9 +285,22 @@ async def api_status():
     }
 
 
+_LATEST_SENTINEL = {
+    "spo2": -1, "spo2_alarm": False,
+    "bpm": -1, "bpm_alarm": False,
+    "perfusion": -1,
+}
+
+
 @router.get("/latest")
-async def api_latest():
-    return state.latest_values
+async def api_latest(request: Request):
+    if state.is_paired:
+        return state.latest_values
+    # The reader's own dashboard carries the per-boot UI token; everyone
+    # else gets sentinels until a hub is approved. Soft gating, not auth.
+    if request.headers.get("x-ui-token") == state.ui_token:
+        return state.latest_values
+    return _LATEST_SENTINEL
 
 
 @router.get("/diagnostics")
