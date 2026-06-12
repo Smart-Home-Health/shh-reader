@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SHH Reader</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=2" />
 </head>
 <body>
   <div class="dashboard-wrapper">
@@ -122,7 +122,6 @@
           <section class="cfg-section">
             <h3>Pairing</h3>
             <p id="pair-text">Not paired. Initiate pairing from the host app.</p>
-            <p id="pair-code" class="code hidden"></p>
             <button id="btn-unpair" class="danger hidden" style="margin-top:.5rem">Unpair</button>
           </section>
 
@@ -173,6 +172,23 @@
       </div>
     </div>
 
+    <!-- Pairing Request Modal -->
+    <div id="modal-pair" class="modal-overlay hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Pairing Request</h2>
+        </div>
+        <div class="modal-body">
+          <p>Hub at <strong id="pair-hub-ip">?</strong> wants to pair with this reader.</p>
+          <p class="hint">Once allowed, vitals will stream to this hub.</p>
+          <div style="display:flex;gap:.5rem;margin-top:.75rem">
+            <button id="btn-pair-allow" class="primary">Allow</button>
+            <button id="btn-pair-deny" class="danger">Deny</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Diagnostics Modal -->
     <div id="modal-diag" class="modal-overlay hidden">
       <div class="modal-content modal-wide">
@@ -187,6 +203,7 @@
     </div>
 
   </div>
-  <script src="/static/app.js?v=2"></script>
+  <script>window.UI_TOKEN = "{{ ui_token }}";</script>
+  <script src="/static/app.js?v=4"></script>
 </body>
 </html>

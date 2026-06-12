@@ -8,7 +8,7 @@ let diagWs = null;
 const HISTORY_SEC = 300;
 const POLL_MS = 1000;
 const history = { spo2: [], bpm: [], perfusion: [] };
-const graphColors = { spo2: "#60a5fa", bpm: "#34d399", perfusion: "#fb923c" };
+const graphColors = { spo2: "#58a6ff", bpm: "#3fb950", perfusion: "#f0883e" };
 const graphRanges = { spo2: [80, 100], bpm: [40, 180], perfusion: [0, 100] };
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -21,7 +21,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 async function api(method, path, body) {
-  const opts = { method, headers: { "Content-Type": "application/json" } };
+  const opts = { method, headers: { "Content-Type": "application/json", "X-UI-Token": window.UI_TOKEN || "" } };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(`/api${path}`, opts);
   const data = await res.json();
@@ -71,8 +71,11 @@ function setupListeners() {
   $("#btn-settings-close").addEventListener("click", () => closeModal("modal-settings"));
   $("#btn-diag-open").addEventListener("click", () => { openModal("modal-diag"); loadDiagBuffer(); });
   $("#btn-diag-close").addEventListener("click", () => closeModal("modal-diag"));
+  $("#btn-pair-allow").addEventListener("click", () => respondToPair(true));
+  $("#btn-pair-deny").addEventListener("click", () => respondToPair(false));
 
   $$(".modal-overlay").forEach((el) => {
+    if (el.id === "modal-pair") return; // must be answered via Allow/Deny
     el.addEventListener("click", (e) => { if (e.target === el) el.classList.add("hidden"); });
   });
 }
@@ -139,12 +142,28 @@ function updatePairUI(cfg) {
   if (cfg.is_paired) {
     $("#pair-text").textContent = `Paired — Reader #${cfg.reader_id ?? "?"}`;
     $("#btn-unpair").classList.remove("hidden");
-    $("#pair-code").classList.add("hidden");
   } else {
     $("#pair-text").textContent = "Not paired. Initiate pairing from the host app.";
     $("#btn-unpair").classList.add("hidden");
-    $("#pair-code").classList.add("hidden");
   }
+  updatePairRequestModal(cfg);
+}
+
+function updatePairRequestModal(cfg) {
+  if (cfg.pending_pair) {
+    $("#pair-hub-ip").textContent = cfg.pending_pair.hub_ip || "unknown";
+    openModal("modal-pair");
+  } else {
+    closeModal("modal-pair");
+  }
+}
+
+async function respondToPair(accept) {
+  try {
+    await api("POST", "/pair/respond", { accept });
+  } catch (e) { alert(e.message); }
+  closeModal("modal-pair");
+  await loadConfig();
 }
 
 function updateRunningUI(running) {
@@ -249,9 +268,6 @@ function drawGraph(canvasId, key, color) {
   ctx.lineTo(lx, h);
   ctx.lineTo(((arr[0].t - tMin) / (HISTORY_SEC * 1000)) * w, h);
   ctx.closePath();
-  const grad = ctx.createLinearGradient(0, 0, 0, h);
-  grad.addColorStop(0, color.replace(")", ",.15)").replace("rgb", "rgba").replace("#", ""));
-  grad.addColorStop(1, "transparent");
   ctx.fillStyle = `${color}11`;
   ctx.fill();
 }
@@ -263,9 +279,9 @@ function drawAllGraphs() {
 }
 
 function updateVitals(parsed) {
-  if (parsed.spo2 != null) { $("#val-spo2").textContent = parsed.spo2; pushHistory("spo2", parsed.spo2); }
-  if (parsed.bpm != null) { $("#val-bpm").textContent = parsed.bpm; pushHistory("bpm", parsed.bpm); }
-  if (parsed.perfusion != null) { $("#val-perf").textContent = parsed.perfusion; pushHistory("perfusion", parsed.perfusion); }
+  if (parsed.spo2 != null) { $("#val-spo2").textContent = parsed.spo2 < 0 ? "--" : parsed.spo2; pushHistory("spo2", parsed.spo2); }
+  if (parsed.bpm != null) { $("#val-bpm").textContent = parsed.bpm < 0 ? "--" : parsed.bpm; pushHistory("bpm", parsed.bpm); }
+  if (parsed.perfusion != null) { $("#val-perf").textContent = parsed.perfusion < 0 ? "--" : parsed.perfusion; pushHistory("perfusion", parsed.perfusion); }
   $("#alarm-spo2").classList.toggle("hidden", !parsed.spo2_alarm);
   $("#alarm-bpm").classList.toggle("hidden", !parsed.bpm_alarm);
   drawAllGraphs();
@@ -340,13 +356,14 @@ function appendDiag(line) {
 }
 
 // Poll config for pairing changes and latest vitals
+// (2s so an incoming pairing request prompts quickly)
 setInterval(async () => {
   try {
     const cfg = await api("GET", "/config");
     updatePairUI(cfg);
     updateRunningUI(cfg.is_running);
   } catch (_) {}
-}, 5000);
+}, 2000);
 
 setInterval(async () => {
   try {
