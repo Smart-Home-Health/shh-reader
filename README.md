@@ -28,6 +28,118 @@ bedside monitor ──serial/LAN──▶ SHH Reader ──encrypted WebSocket�
                                     └─▶ optional MQTT (Home Assistant, etc.)
 ```
 
+The Reader listens to the monitor, shows the live numbers on its own display
+page, and sends them securely to your Smart Home Health app. Settings are
+saved locally, so after a restart or power cut the Reader picks up where it
+left off and starts reading again on its own.
+
+## Setting it up
+
+You don't need to know how to code. The Reader comes as a ready-made package
+that Docker downloads and runs for you — there's nothing to build or compile.
+
+**You'll need:**
+
+- A small computer that can stay switched on near the monitor — a Raspberry Pi
+  is perfect, but any Windows, Mac, or Linux machine works
+- About 15 minutes
+- An internet connection for the first setup
+
+### Step 1 — Install Docker
+
+Docker is a free program that downloads and runs the Reader for you.
+
+> **Already running the Smart Home Health app with Docker?** Then you've done
+> this before — skip to Step 2.
+
+- **Windows or Mac:** download **Docker Desktop** from
+  [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/),
+  install it, and start it. Wait until it says it's **running**.
+- **Raspberry Pi or Linux:** open a terminal and paste this one line, then
+  press Enter:
+
+  ```bash
+  curl -fsSL https://get.docker.com | sh
+  ```
+
+### Step 2 — Create the Reader's settings file
+
+1. Make a new folder somewhere you'll remember — call it `shh-reader`.
+2. Inside that folder, create a plain text file named exactly
+   **`docker-compose.yml`**.
+3. Copy and paste this into the file, and save it:
+
+```yaml
+services:
+  reader:
+    image: ghcr.io/smart-home-health/shh-reader:latest
+    ports:
+      - "8080:8080"   # the Reader's own display page
+      - "5001:5001"   # network-connected monitors send readings here
+    volumes:
+      - shh-data:/app/data
+#    devices:
+#      - /dev/ttyUSB0:/dev/ttyUSB0   # remove the two # signs above if your monitor plugs in by USB
+    restart: unless-stopped
+
+volumes:
+  shh-data:
+```
+
+> **Is your monitor connected by USB cable?** Remove the `#` at the start of
+> the two `devices:` lines so the Reader can see the USB port. If your monitor
+> connects over your home network instead, leave the file exactly as it is.
+
+### Step 3 — Start the Reader
+
+Open a terminal **inside the folder** you just made:
+
+- **Windows:** open the folder, click the address bar at the top, type `cmd`,
+  and press Enter.
+- **Mac:** right-click the folder and choose **New Terminal at Folder**.
+- **Raspberry Pi / Linux:** open your terminal and `cd` into the folder.
+
+Then copy and paste this line and press Enter:
+
+```bash
+docker compose up -d
+```
+
+The first time, Docker downloads the Reader — this can take a minute or two.
+When the command finishes, the Reader is running and will start itself again
+automatically after any restart or power cut.
+
+### Step 4 — Open the Reader's page
+
+Open a web browser and go to:
+
+- **on the same computer:** `http://localhost:8080`
+- **from another computer or phone:** `http://` followed by the Reader
+  computer's address, then `:8080` — for example `http://192.168.1.42:8080`
+
+Pick your monitor model and how it's connected, press **Start**, and the live
+numbers appear. Then pair it with your Smart Home Health app from the app's
+Readers page, and approve the request on the Reader's screen when it pops up.
+
+### Updating later
+
+When a new version comes out, run these two lines in the same folder:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Your settings and pairing are kept — the Reader carries on where it left off.
+
+> **Prefer things that never change on their own?** Instead of
+> `shh-reader:latest` in your file, you can pin a specific version, like
+> `shh-reader:0.1.1`. Then the Reader only updates when you change that line.
+
+## For developers
+
+The code is organized so that adding a new monitor is one small file:
+
 - **Connections** (`connections/`): reads raw lines from the monitor over USB
   serial or a LAN TCP listener.
 - **Devices** (`devices/`): a small driver per monitor model parses those lines
@@ -37,50 +149,7 @@ bedside monitor ──serial/LAN──▶ SHH Reader ──encrypted WebSocket�
 - **Web UI** (`routes/`, `templates/`, `static/`): a setup page and a clear
   bedside display of the live numbers, served on port 8080.
 
-Settings are saved locally, so after a restart or power cut the Reader picks
-up where it left off and starts reading again on its own.
-
-## Quick start with Docker
-
-No cloning or building needed — a ready-made image is published for both
-regular PCs (amd64) and Raspberry Pi (arm64). Create a `docker-compose.yml`:
-
-```yaml
-services:
-  reader:
-    image: ghcr.io/smart-home-health/shh-reader:latest
-    ports:
-      - "8080:8080"   # web UI / bedside display
-      - "5001:5001"   # LAN-connected monitors stream here
-    volumes:
-      - shh-data:/app/data
-#    devices:
-#      - /dev/ttyUSB0:/dev/ttyUSB0   # uncomment for USB-connected monitors
-    restart: unless-stopped
-
-volumes:
-  shh-data:
-```
-
-Then:
-
-```bash
-docker compose up -d
-```
-
-Open `http://<reader-address>:8080` in a browser, pick your monitor model
-and connection, and point it at your Smart Home Health app.
-
-Prefer a fixed version over `latest`? Every release is also tagged, e.g.
-`ghcr.io/smart-home-health/shh-reader:0.1.0`.
-
-**Using a USB-connected monitor?** Uncomment the `devices:` lines so the
-container can see the serial port.
-
-**Using a LAN-connected monitor?** The Reader listens for it on port 5001
-(already exposed in the compose file).
-
-### Building from source instead
+### Building from source
 
 ```bash
 git clone https://github.com/Smart-Home-Health/shh-reader.git
@@ -88,7 +157,7 @@ cd shh-reader
 docker compose up -d --build
 ```
 
-## Running without Docker
+### Running without Docker
 
 Python 3.12+:
 
@@ -97,7 +166,14 @@ pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8080
 ```
 
-## Adding a device driver
+### Running the tests
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest
+```
+
+### Adding a device driver
 
 Each supported monitor is one small class in `devices/` that extends
 `BaseDevice` and implements `parse_line()` — turning a raw line of the
