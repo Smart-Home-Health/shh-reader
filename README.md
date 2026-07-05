@@ -42,25 +42,51 @@ up where it left off and starts reading again on its own.
 
 ## Quick start with Docker
 
+No cloning or building needed — a ready-made image is published for both
+regular PCs (amd64) and Raspberry Pi (arm64). Create a `docker-compose.yml`:
+
+```yaml
+services:
+  reader:
+    image: ghcr.io/smart-home-health/shh-reader:latest
+    ports:
+      - "8080:8080"   # web UI / bedside display
+      - "5001:5001"   # LAN-connected monitors stream here
+    volumes:
+      - shh-data:/app/data
+#    devices:
+#      - /dev/ttyUSB0:/dev/ttyUSB0   # uncomment for USB-connected monitors
+    restart: unless-stopped
+
+volumes:
+  shh-data:
+```
+
+Then:
+
 ```bash
-git clone https://github.com/Smart-Home-Health/shh-reader.git
-cd shh-reader
 docker compose up -d
 ```
 
-Then open `http://<reader-address>:8080` in a browser, pick your monitor model
+Open `http://<reader-address>:8080` in a browser, pick your monitor model
 and connection, and point it at your Smart Home Health app.
 
-**Using a USB-connected monitor?** Uncomment the `devices:` lines in
-`docker-compose.yml` so the container can see the serial port:
+Prefer a fixed version over `latest`? Every release is also tagged, e.g.
+`ghcr.io/smart-home-health/shh-reader:0.1.0`.
 
-```yaml
-    devices:
-      - /dev/ttyUSB0:/dev/ttyUSB0
-```
+**Using a USB-connected monitor?** Uncomment the `devices:` lines so the
+container can see the serial port.
 
 **Using a LAN-connected monitor?** The Reader listens for it on port 5001
 (already exposed in the compose file).
+
+### Building from source instead
+
+```bash
+git clone https://github.com/Smart-Home-Health/shh-reader.git
+cd shh-reader
+docker compose up -d --build
+```
 
 ## Running without Docker
 
@@ -83,7 +109,7 @@ can capture some raw output from your device, that's most of the work.
 The Reader is one piece of [Smart Home Health](https://smarthomehealth.org),
 a free, open-source system for families and caregivers:
 
-- [smart-home-health-hub](https://github.com/Smart-Home-Health/smart-home-health-hub)
+- [platform](https://github.com/Smart-Home-Health/platform)
   — the app: medications, vitals, tasks, records, and alerts in one place.
 - **shh-reader** (this repo) — brings bedside monitors online.
 
