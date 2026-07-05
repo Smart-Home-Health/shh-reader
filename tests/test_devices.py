@@ -6,7 +6,7 @@ from devices import DEVICE_REGISTRY, get_device, list_devices
 from devices.pm100n import PM100N
 from devices.pm1000n import PM1000N
 
-# Both Mindray models emit the same serial line format:
+# Both Nellcor models emit the same serial line format:
 #   DD-MMM-YY HH:MM:SS  <spo2>[*]  <bpm>[*]  <perfusion>
 # where "*" marks an active alarm and "---" means no finger / no reading.
 DEVICES = [PM100N(), PM1000N()]
@@ -79,7 +79,7 @@ class TestRegistry:
             assert set(d) == {"slug", "name", "supported_connections", "default_baud_rate"}
 
     def test_connection_support(self):
-        # PM-100N is USB-only; PM-1000N also does LAN — the /api/config
+        # PM100N is USB-only; PM1000N also does LAN — the /api/config
         # validation depends on these lists.
         assert get_device("pm100n").supported_connections == ["usb"]
         assert get_device("pm1000n").supported_connections == ["usb", "lan"]

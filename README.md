@@ -12,8 +12,8 @@ them on to your Smart Home Health app — no typing, no writing numbers down.
 
 | Device | Connection |
 | --- | --- |
-| Mindray PM-1000N pulse oximeter | USB serial or LAN |
-| Mindray PM-100N pulse oximeter | USB serial |
+| Covidien Nellcor PM1000N bedside respiratory monitor | USB serial or LAN |
+| Covidien Nellcor PM100N bedside SpO₂ monitor | USB serial |
 
 Readings captured: SpO₂, heart rate, and perfusion.
 
