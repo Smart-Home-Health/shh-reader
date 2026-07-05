@@ -1,0 +1,4 @@
+# Test-only dependencies — keep runtime deps in requirements.txt.
+pytest
+pytest-asyncio
+httpx

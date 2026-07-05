@@ -1,13 +1,17 @@
 services:
   shh-lan:
+    # Published image — `docker compose up -d` pulls it, no build needed.
+    # Developers: `docker compose up -d --build` still builds from source
+    # (and tags the local build with this name).
+    image: ghcr.io/smart-home-health/shh-reader:latest
     build: .
     ports:
-      - "8080:8080"
-      - "5001:5001"
+      - "8080:8080"   # web UI / bedside display
+      - "5001:5001"   # LAN-connected monitors stream here
     volumes:
       - shh-data:/app/data
 #    devices:
-#      - /dev/ttyUSB0:/dev/ttyUSB0
+#      - /dev/ttyUSB0:/dev/ttyUSB0   # uncomment for USB-connected monitors
     restart: unless-stopped
 
 volumes:

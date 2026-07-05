@@ -1,0 +1,10 @@
+# Keep the deploy image lean: no VCS, tests, or caches.
+# (data/ is a runtime volume — never bake local contents into the image.)
+.git
+.github
+tests
+.pytest_cache
+__pycache__
+*.pyc
+data
+.venv

@@ -14,7 +14,7 @@ _LINE_RE = re.compile(
 
 
 class PM1000N(BaseDevice):
-    name = "Mindray PM-1000N"
+    name = "Covidien Nellcor PM1000N"
     slug = "pm1000n"
     supported_connections = ["usb", "lan"]
     default_baud_rate = 115200
